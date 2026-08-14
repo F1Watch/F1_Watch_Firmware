@@ -106,7 +106,7 @@ const char* OPENF1_DRIVERS =
 // ============================================================
 // Keep this URL public. It points to a small manifest stored in
 // the GitHub repository, not to the firmware binary itself.
-#define FW_VERSION "0.2.1"
+#define FW_VERSION "0.3.0"
 
 const char* OTA_MANIFEST_URL =
   "https://raw.githubusercontent.com/F1Watch/F1_Watch_Firmware/main/firmware/latest.json";
@@ -377,7 +377,11 @@ String httpGet(
 
 bool installFirmwareUpdate();
 bool isNewerVersion(const String& available, const String& current);
-void drawOtaStatus(const String& message, uint16_t color);
+void drawOtaStatus(
+  const String& message,
+  uint16_t color,
+  const String& detail = ""
+);
 
 void fetchSchedule();
 void fetchStandings();
@@ -1219,7 +1223,8 @@ bool isNewerVersion(
 
 void drawOtaStatus(
   const String& message,
-  uint16_t color
+  uint16_t color,
+  const String& detail
 ) {
 
   M5Dial.Display.fillScreen(C_BG);
@@ -1229,9 +1234,14 @@ void drawOtaStatus(
   M5Dial.Display.setTextSize(1);
   M5Dial.Display.drawString("[ Firmware Update ]", CX, 55);
   M5Dial.Display.setTextColor(color);
-  M5Dial.Display.drawString(message, CX, 100);
+  M5Dial.Display.drawString(message, CX, 94);
   M5Dial.Display.setTextColor(C_LGRAY);
-  M5Dial.Display.drawString(FW_VERSION, CX, 140);
+  M5Dial.Display.drawString("Current: " + String(FW_VERSION), CX, 126);
+
+  if (!detail.isEmpty()) {
+    M5Dial.Display.setTextColor(C_GRAY);
+    M5Dial.Display.drawString(detail, CX, 150);
+  }
 }
 
 
@@ -1244,7 +1254,7 @@ bool installFirmwareUpdate() {
     return false;
   }
 
-  drawOtaStatus("Checking GitHub...", C_CYAN);
+  drawOtaStatus("Checking GitHub...", C_CYAN, "Please keep WiFi connected");
 
   WiFiClientSecure manifestClient;
   manifestClient.setInsecure(); // Replace with a pinned CA certificate before release.
@@ -1285,12 +1295,12 @@ bool installFirmwareUpdate() {
 
   if (!isNewerVersion(available, FW_VERSION)) {
     otaStatus = "Already up to date";
-    drawOtaStatus(otaStatus, C_GREEN);
+    drawOtaStatus(otaStatus, C_GREEN, "Latest: " + available);
     delay(1800);
     return true;
   }
 
-  drawOtaStatus("Downloading " + available, C_CYAN);
+  drawOtaStatus("Downloading " + available, C_CYAN, "Do not turn off device");
 
   WiFiClientSecure firmwareClient;
   firmwareClient.setInsecure(); // Development setting; pin GitHub CA for production.
@@ -1306,20 +1316,34 @@ bool installFirmwareUpdate() {
     M5Dial.Display.drawString(String(pct) + "%", CX, 155);
   });
 
+  // Keep control of the reboot so the user can see completion.
+  httpUpdate.rebootOnUpdate(false);
+
   t_httpUpdate_return result = httpUpdate.update(firmwareClient, url);
 
   if (result == HTTP_UPDATE_NO_UPDATES) {
     otaStatus = "No update available";
   } else if (result == HTTP_UPDATE_FAILED) {
-    otaStatus = "Update failed";
+    otaStatus = "Update failed: " + httpUpdate.getLastErrorString();
   } else {
-    // On success ESP.restart() is called by HTTPUpdate.
-    otaStatus = "Restarting...";
+    otaStatus = "Installed successfully";
   }
 
-  drawOtaStatus(otaStatus, result == HTTP_UPDATE_FAILED ? C_RED : C_GREEN);
-  delay(1800);
-  return result == HTTP_UPDATE_OK;
+  bool ok = result == HTTP_UPDATE_OK;
+
+  drawOtaStatus(
+    otaStatus,
+    ok ? C_GREEN : C_RED,
+    ok ? "Restarting now..." : "Please try again"
+  );
+
+  delay(ok ? 1200 : 2200);
+
+  if (ok) {
+    ESP.restart();
+  }
+
+  return ok;
 }
 
 
@@ -2120,7 +2144,7 @@ void drawKR(
 // Vertical team-colour bar + initials, inspired by a race broadcast title.
 void drawFavoriteBadge() {
 
-  const int barY = 148;
+  const int barY = 146;
   const int barW = 10;
   const int barH = 32;
   const int gap = 12;
@@ -2218,7 +2242,7 @@ void drawClockPage() {
       currentAmPm();
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     int timeW =
@@ -2250,13 +2274,13 @@ void drawClockPage() {
     );
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     M5Dial.Display.drawString(
       ts,
       left,
-      104
+      103
     );
 
     M5Dial.Display.setTextSize(
@@ -2266,7 +2290,7 @@ void drawClockPage() {
     M5Dial.Display.drawString(
       suffix,
       left + timeW + gap,
-      104
+      103
     );
 
   } else {
@@ -2276,13 +2300,13 @@ void drawClockPage() {
     );
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     M5Dial.Display.drawString(
       ts,
       CX,
-      104
+      103
     );
   }
 
@@ -2301,7 +2325,7 @@ void drawClockPage() {
   M5Dial.Display.drawString(
     currentDateStr(),
     CX,
-    42
+    30
   );
 
   if (
@@ -2327,41 +2351,42 @@ void drawClockPage() {
     M5Dial.Display.drawString(
       currentDayStr(),
       CX,
-      66
+      52
     );
   }
 
-  // Bottom item: the centred team-colour bar and driver initials.
+  // Desk Clock: team identity below the primary time display.
   drawFavoriteBadge();
 
-  int dotY = 212;
-  int spacing = 16;
+  // Secondary, glanceable race information for a desk display.
+  M5Dial.Display.setTextSize(1);
+  M5Dial.Display.setTextDatum(middle_center);
 
-  int startX =
-    CX -
-    (PAGE_COUNT - 1) *
-    spacing / 2;
-
-  for (
-    int i = 0;
-    i < PAGE_COUNT;
-    i++
-  ) {
-
-    uint16_t col =
-      (i == currentSlot)
-        ? fg
-        : sub;
-
-    M5Dial.Display.fillCircle(
-      startX + i * spacing,
-      dotY,
-      (i == currentSlot)
-        ? 5
-        : 3,
-      col
+  if (dataOk && nextRace.name.length() > 0) {
+    M5Dial.Display.setTextColor(sub);
+    M5Dial.Display.drawString(
+      "NEXT: " + shortRaceName(nextRace.name),
+      CX,
+      188
     );
+
+    M5Dial.Display.setTextColor(C_CYAN);
+    M5Dial.Display.drawString(
+      timeUntilRace(nextRace.date, nextRace.raceTime),
+      CX,
+      205
+    );
+  } else {
+    M5Dial.Display.setTextColor(sub);
+    M5Dial.Display.drawString("RACE DATA LOADING", CX, 196);
   }
+
+  // Small connection state replaces the decorative page dots.
+  const bool online = WiFi.status() == WL_CONNECTED;
+  M5Dial.Display.setTextDatum(middle_left);
+  M5Dial.Display.setTextColor(online ? C_GREEN : C_GRAY);
+  M5Dial.Display.drawString(online ? "ONLINE" : "OFFLINE", 64, 220);
+  drawSignalBars(34, 224, online ? 4 : 0, online ? C_GREEN : C_GRAY);
 }
 
 
@@ -2383,10 +2408,10 @@ void drawClockTimeOnly() {
 
   // 기존 화면에서 시간 영역만 삭제
   M5Dial.Display.fillRect(
-    35,
-    78,
-    170,
-    52,
+    18,
+    66,
+    204,
+    72,
     bg
   );
 
@@ -2407,7 +2432,7 @@ void drawClockTimeOnly() {
       currentAmPm();
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     int timeW =
@@ -2439,13 +2464,13 @@ void drawClockTimeOnly() {
     );
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     M5Dial.Display.drawString(
       ts,
       left,
-      104
+      103
     );
 
     M5Dial.Display.setTextSize(
@@ -2455,7 +2480,7 @@ void drawClockTimeOnly() {
     M5Dial.Display.drawString(
       suffix,
       left + timeW + gap,
-      104
+      103
     );
 
   } else {
@@ -2465,13 +2490,13 @@ void drawClockTimeOnly() {
     );
 
     M5Dial.Display.setTextSize(
-      2
+      3
     );
 
     M5Dial.Display.drawString(
       currentTimeStr(),
       CX,
-      104
+      103
     );
   }
 }
