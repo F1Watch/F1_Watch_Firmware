@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include <math.h>
 
 // ============================================================
 // M5Dial F1 LIVE
@@ -106,7 +107,7 @@ const char* OPENF1_DRIVERS =
 // ============================================================
 // Keep this URL public. It points to a small manifest stored in
 // the GitHub repository, not to the firmware binary itself.
-#define FW_VERSION "0.3.1"
+#define FW_VERSION "0.3.2"
 
 const char* OTA_MANIFEST_URL =
   "https://raw.githubusercontent.com/F1Watch/F1_Watch_Firmware/main/firmware/latest.json";
@@ -2142,7 +2143,7 @@ void drawKR(
 // CLOCK PAGE
 // ============================================================
 
-// A subtle racing-style background drawn in code: no image asset or extra flash.
+// A subtle racing-wheel background drawn in code: no image asset or extra flash.
 void drawClockBackground(uint16_t bg) {
   M5Dial.Display.fillScreen(bg);
   M5Dial.Display.fillCircle(CX, CY, 120, bg);
@@ -2150,19 +2151,38 @@ void drawClockBackground(uint16_t bg) {
   // Keep the light/inverted theme clean and highly readable.
   if (clockInverted) return;
 
-  const uint16_t ringOuter = 0x0841;
-  const uint16_t ringInner = 0x0421;
-  const uint16_t accentSoft = 0x1802;
+  const uint16_t tire = 0x0841;
+  const uint16_t tireEdge = 0x18C3;
+  const uint16_t rim = 0x1082;
+  const uint16_t spoke = 0x2945;
+  const uint16_t hub = 0x39C7;
 
-  // Faint instrument-cluster rings near the outer edge.
-  M5Dial.Display.drawCircle(CX, CY, 112, ringOuter);
-  M5Dial.Display.drawCircle(CX, CY, 108, ringInner);
+  // Low-contrast wheel so the clock remains the visual priority.
+  M5Dial.Display.fillCircle(CX, CY, 94, tire);
+  M5Dial.Display.drawCircle(CX, CY, 94, tireEdge);
+  M5Dial.Display.fillCircle(CX, CY, 72, rim);
+  M5Dial.Display.drawCircle(CX, CY, 72, tireEdge);
 
-  // Minimal diagonal race lines stay clear of the clock information.
-  M5Dial.Display.drawLine(20, 178, 52, 210, ringInner);
-  M5Dial.Display.drawLine(27, 171, 59, 203, accentSoft);
-  M5Dial.Display.drawLine(181, 29, 213, 61, accentSoft);
-  M5Dial.Display.drawLine(188, 36, 220, 68, ringInner);
+  // Ten thin spokes create a generic race-wheel silhouette.
+  for (int i = 0; i < 10; i++) {
+    const float angle = -1.5707963f + i * 0.6283185f;
+    const int x1 = CX + (int)(cosf(angle) * 18.0f);
+    const int y1 = CY + (int)(sinf(angle) * 18.0f);
+    const int x2 = CX + (int)(cosf(angle) * 66.0f);
+    const int y2 = CY + (int)(sinf(angle) * 66.0f);
+    M5Dial.Display.drawLine(x1, y1, x2, y2, spoke);
+  }
+
+  M5Dial.Display.fillCircle(CX, CY, 16, hub);
+  M5Dial.Display.fillCircle(CX, CY, 7, tire);
+
+  // Five subtle wheel bolts, intentionally without any tyre-brand artwork.
+  for (int i = 0; i < 5; i++) {
+    const float angle = -1.5707963f + i * 1.2566371f;
+    const int boltX = CX + (int)(cosf(angle) * 11.0f);
+    const int boltY = CY + (int)(sinf(angle) * 11.0f);
+    M5Dial.Display.fillCircle(boltX, boltY, 2, tireEdge);
+  }
 }
 
 // Vertical team-colour bar + initials, inspired by a race broadcast title.
