@@ -106,7 +106,7 @@ const char* OPENF1_DRIVERS =
 // ============================================================
 // Keep this URL public. It points to a small manifest stored in
 // the GitHub repository, not to the firmware binary itself.
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.3.1"
 
 const char* OTA_MANIFEST_URL =
   "https://raw.githubusercontent.com/F1Watch/F1_Watch_Firmware/main/firmware/latest.json";
@@ -419,6 +419,7 @@ void drawKR(
 
 void drawClockPage();
 void drawClockTimeOnly();
+void drawClockBackground(uint16_t bg);
 void drawFavoriteBadge();
 
 void drawNextRacePage(
@@ -2141,10 +2142,33 @@ void drawKR(
 // CLOCK PAGE
 // ============================================================
 
+// A subtle racing-style background drawn in code: no image asset or extra flash.
+void drawClockBackground(uint16_t bg) {
+  M5Dial.Display.fillScreen(bg);
+  M5Dial.Display.fillCircle(CX, CY, 120, bg);
+
+  // Keep the light/inverted theme clean and highly readable.
+  if (clockInverted) return;
+
+  const uint16_t ringOuter = 0x0841;
+  const uint16_t ringInner = 0x0421;
+  const uint16_t accentSoft = 0x1802;
+
+  // Faint instrument-cluster rings near the outer edge.
+  M5Dial.Display.drawCircle(CX, CY, 112, ringOuter);
+  M5Dial.Display.drawCircle(CX, CY, 108, ringInner);
+
+  // Minimal diagonal race lines stay clear of the clock information.
+  M5Dial.Display.drawLine(20, 178, 52, 210, ringInner);
+  M5Dial.Display.drawLine(27, 171, 59, 203, accentSoft);
+  M5Dial.Display.drawLine(181, 29, 213, 61, accentSoft);
+  M5Dial.Display.drawLine(188, 36, 220, 68, ringInner);
+}
+
 // Vertical team-colour bar + initials, inspired by a race broadcast title.
 void drawFavoriteBadge() {
 
-  const int barY = 146;
+  const int barY = 148;
   const int barW = 10;
   const int barH = 32;
   const int gap = 12;
@@ -2213,16 +2237,7 @@ void drawClockPage() {
       ? C_DARK
       : C_LGRAY;
 
-  M5Dial.Display.fillScreen(
-    bg
-  );
-
-  M5Dial.Display.fillCircle(
-    CX,
-    CY,
-    120,
-    bg
-  );
+  drawClockBackground(bg);
 
   M5Dial.Display.setFont(
     FONT_ASCII
@@ -2242,7 +2257,7 @@ void drawClockPage() {
       currentAmPm();
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     int timeW =
@@ -2274,13 +2289,13 @@ void drawClockPage() {
     );
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     M5Dial.Display.drawString(
       ts,
       left,
-      103
+      104
     );
 
     M5Dial.Display.setTextSize(
@@ -2300,13 +2315,13 @@ void drawClockPage() {
     );
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     M5Dial.Display.drawString(
       ts,
       CX,
-      103
+      104
     );
   }
 
@@ -2325,7 +2340,7 @@ void drawClockPage() {
   M5Dial.Display.drawString(
     currentDateStr(),
     CX,
-    30
+    42
   );
 
   if (
@@ -2351,42 +2366,22 @@ void drawClockPage() {
     M5Dial.Display.drawString(
       currentDayStr(),
       CX,
-      52
+      66
     );
   }
 
-  // Desk Clock: team identity below the primary time display.
+  // Team identity below the primary time display.
   drawFavoriteBadge();
 
-  // Secondary, glanceable race information for a desk display.
-  M5Dial.Display.setTextSize(1);
-  M5Dial.Display.setTextDatum(middle_center);
+  // Preserve the original, uncluttered page navigation at the bottom.
+  int dotY = 212;
+  int spacing = 16;
+  int startX = CX - ((PAGE_COUNT - 1) * spacing) / 2;
 
-  if (dataOk && nextRace.name.length() > 0) {
-    M5Dial.Display.setTextColor(sub);
-    M5Dial.Display.drawString(
-      "NEXT: " + shortRaceName(nextRace.name),
-      CX,
-      188
-    );
-
-    M5Dial.Display.setTextColor(C_CYAN);
-    M5Dial.Display.drawString(
-      timeUntilRace(nextRace.date, nextRace.raceTime),
-      CX,
-      205
-    );
-  } else {
-    M5Dial.Display.setTextColor(sub);
-    M5Dial.Display.drawString("RACE DATA LOADING", CX, 196);
+  for (int i = 0; i < PAGE_COUNT; i++) {
+    uint16_t col = (i == currentSlot) ? fg : sub;
+    M5Dial.Display.fillCircle(startX + i * spacing, dotY, 3, col);
   }
-
-  // Small connection state replaces the decorative page dots.
-  const bool online = WiFi.status() == WL_CONNECTED;
-  M5Dial.Display.setTextDatum(middle_left);
-  M5Dial.Display.setTextColor(online ? C_GREEN : C_GRAY);
-  M5Dial.Display.drawString(online ? "ONLINE" : "OFFLINE", 64, 220);
-  drawSignalBars(34, 224, online ? 4 : 0, online ? C_GREEN : C_GRAY);
 }
 
 
@@ -2408,10 +2403,10 @@ void drawClockTimeOnly() {
 
   // 기존 화면에서 시간 영역만 삭제
   M5Dial.Display.fillRect(
-    18,
-    66,
-    204,
-    72,
+    35,
+    78,
+    170,
+    52,
     bg
   );
 
@@ -2432,7 +2427,7 @@ void drawClockTimeOnly() {
       currentAmPm();
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     int timeW =
@@ -2464,13 +2459,13 @@ void drawClockTimeOnly() {
     );
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     M5Dial.Display.drawString(
       ts,
       left,
-      103
+      104
     );
 
     M5Dial.Display.setTextSize(
@@ -2490,13 +2485,13 @@ void drawClockTimeOnly() {
     );
 
     M5Dial.Display.setTextSize(
-      3
+      2
     );
 
     M5Dial.Display.drawString(
       currentTimeStr(),
       CX,
-      103
+      104
     );
   }
 }
