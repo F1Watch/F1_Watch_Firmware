@@ -100,6 +100,19 @@ const char* OPENF1_DRIVERS =
 
 
 // ============================================================
+// Firmware update (GitHub HTTPS OTA)
+// ============================================================
+// Keep this URL public. It points to a small manifest stored in
+// the GitHub repository, not to the firmware binary itself.
+#define FW_VERSION "0.2.0"
+
+const char* OTA_MANIFEST_URL =
+  "https://raw.githubusercontent.com/F1Watch/F1_Watch_Firmware/main/firmware/latest.json";
+
+String otaStatus = "Ready";
+
+
+// ============================================================
 // Colors
 // ============================================================
 
@@ -273,13 +286,14 @@ int editingSlot = 0;
 // Settings menu
 // ============================================================
 
-#define SETTING_COUNT 5
+#define SETTING_COUNT 6
 
 #define SETTING_BUZZER       0
 #define SETTING_BRIGHTNESS   1
 #define SETTING_WIFI_SETUP   2
 #define SETTING_WIFI_FORGET  3
 #define SETTING_PAGE_ORDER   4
+#define SETTING_FIRMWARE     5
 
 int settingSelIdx = 0;
 
@@ -358,6 +372,10 @@ const char* lookupDriver(
 String httpGet(
   const String& url
 );
+
+bool installFirmwareUpdate();
+bool isNewerVersion(const String& available, const String& current);
+void drawOtaStatus(const String& message, uint16_t color);
 
 void fetchSchedule();
 void fetchStandings();
@@ -1169,6 +1187,137 @@ String httpGet(
   http.end();
 
   return body;
+}
+
+
+// ============================================================
+// GitHub HTTPS OTA
+// ============================================================
+
+bool isNewerVersion(
+  const String& available,
+  const String& current
+) {
+
+  int aMajor = 0, aMinor = 0, aPatch = 0;
+  int cMajor = 0, cMinor = 0, cPatch = 0;
+
+  if (
+    sscanf(available.c_str(), "%d.%d.%d", &aMajor, &aMinor, &aPatch) != 3 ||
+    sscanf(current.c_str(), "%d.%d.%d", &cMajor, &cMinor, &cPatch) != 3
+  ) {
+    return false;
+  }
+
+  if (aMajor != cMajor) return aMajor > cMajor;
+  if (aMinor != cMinor) return aMinor > cMinor;
+  return aPatch > cPatch;
+}
+
+
+void drawOtaStatus(
+  const String& message,
+  uint16_t color
+) {
+
+  M5Dial.Display.fillScreen(C_BG);
+  M5Dial.Display.setFont(FONT_ASCII);
+  M5Dial.Display.setTextDatum(middle_center);
+  M5Dial.Display.setTextColor(C_WHITE);
+  M5Dial.Display.setTextSize(1);
+  M5Dial.Display.drawString("[ Firmware Update ]", CX, 55);
+  M5Dial.Display.setTextColor(color);
+  M5Dial.Display.drawString(message, CX, 100);
+  M5Dial.Display.setTextColor(C_LGRAY);
+  M5Dial.Display.drawString(FW_VERSION, CX, 140);
+}
+
+
+bool installFirmwareUpdate() {
+
+  if (WiFi.status() != WL_CONNECTED) {
+    otaStatus = "WiFi not connected";
+    drawOtaStatus(otaStatus, C_RED);
+    delay(1800);
+    return false;
+  }
+
+  drawOtaStatus("Checking GitHub...", C_CYAN);
+
+  WiFiClientSecure manifestClient;
+  manifestClient.setInsecure(); // Replace with a pinned CA certificate before release.
+
+  HTTPClient https;
+  https.setTimeout(12000);
+
+  if (!https.begin(manifestClient, OTA_MANIFEST_URL)) {
+    otaStatus = "Manifest connection failed";
+    drawOtaStatus(otaStatus, C_RED);
+    delay(1800);
+    return false;
+  }
+
+  int code = https.GET();
+
+  if (code != HTTP_CODE_OK) {
+    otaStatus = "Manifest unavailable";
+    https.end();
+    drawOtaStatus(otaStatus, C_RED);
+    delay(1800);
+    return false;
+  }
+
+  DynamicJsonDocument doc(768);
+  DeserializationError err = deserializeJson(doc, https.getString());
+  https.end();
+
+  if (err || !doc["version"] || !doc["url"]) {
+    otaStatus = "Manifest is invalid";
+    drawOtaStatus(otaStatus, C_RED);
+    delay(1800);
+    return false;
+  }
+
+  String available = doc["version"].as<String>();
+  String url = doc["url"].as<String>();
+
+  if (!isNewerVersion(available, FW_VERSION)) {
+    otaStatus = "Already up to date";
+    drawOtaStatus(otaStatus, C_GREEN);
+    delay(1800);
+    return true;
+  }
+
+  drawOtaStatus("Downloading " + available, C_CYAN);
+
+  WiFiClientSecure firmwareClient;
+  firmwareClient.setInsecure(); // Development setting; pin GitHub CA for production.
+
+  httpUpdate.onProgress([](int current, int total) {
+    int pct = total > 0 ? current * 100 / total : 0;
+    M5Dial.Display.fillRect(35, 125, 170, 12, C_DARK);
+    M5Dial.Display.fillRect(35, 125, 170 * pct / 100, 12, C_CYAN);
+    M5Dial.Display.setFont(FONT_ASCII);
+    M5Dial.Display.setTextColor(C_WHITE);
+    M5Dial.Display.setTextDatum(middle_center);
+    M5Dial.Display.setTextSize(1);
+    M5Dial.Display.drawString(String(pct) + "%", CX, 155);
+  });
+
+  t_httpUpdate_return result = httpUpdate.update(firmwareClient, url);
+
+  if (result == HTTP_UPDATE_NO_UPDATES) {
+    otaStatus = "No update available";
+  } else if (result == HTTP_UPDATE_FAILED) {
+    otaStatus = "Update failed";
+  } else {
+    // On success ESP.restart() is called by HTTPUpdate.
+    otaStatus = "Restarting...";
+  }
+
+  drawOtaStatus(otaStatus, result == HTTP_UPDATE_FAILED ? C_RED : C_GREEN);
+  delay(1800);
+  return result == HTTP_UPDATE_OK;
 }
 
 
@@ -3286,12 +3435,13 @@ void drawSettingsPage() {
     "Brightness",
     "WiFi Setup",
     "WiFi Forget",
-    "Page Order"
+    "Page Order",
+    "Firmware Update"
   };
 
-  int startY = 62;
+  int startY = 54;
 
-  int rowH = 27;
+  int rowH = 23;
 
   for (
     int i = 0;
@@ -3361,7 +3511,7 @@ void drawSettingsPage() {
     M5Dial.Display.drawString(
       labels[i],
       28,
-      y + 11
+      y + 10
     );
 
     M5Dial.Display.setTextDatum(
@@ -3375,9 +3525,9 @@ void drawSettingsPage() {
 
       M5Dial.Display.fillRoundRect(
         154,
-        y + 5,
+        y + 3,
         54,
-        17,
+        16,
         5,
         buzzerEnabled
           ? C_GREEN
@@ -3393,7 +3543,7 @@ void drawSettingsPage() {
           ? "ON"
           : "OFF",
         195,
-        y + 13
+        y + 11
       );
 
     } else if (
@@ -3419,7 +3569,7 @@ void drawSettingsPage() {
       M5Dial.Display.drawString(
         String(brtPct) + "%",
         200,
-        y + 13
+        y + 11
       );
 
     } else if (
@@ -3434,7 +3584,7 @@ void drawSettingsPage() {
       M5Dial.Display.drawString(
         "Open >",
         200,
-        y + 13
+        y + 11
       );
 
     } else if (
@@ -3449,10 +3599,12 @@ void drawSettingsPage() {
       M5Dial.Display.drawString(
         "Clear >",
         200,
-        y + 13
+        y + 11
       );
 
-    } else {
+    } else if (
+      i == SETTING_PAGE_ORDER
+    ) {
 
       M5Dial.Display.setTextColor(
         C_LGRAY
@@ -3461,7 +3613,19 @@ void drawSettingsPage() {
       M5Dial.Display.drawString(
         "Edit >",
         200,
-        y + 13
+        y + 11
+      );
+
+    } else {
+
+      M5Dial.Display.setTextColor(
+        C_GREEN
+      );
+
+      M5Dial.Display.drawString(
+        "Check >",
+        200,
+        y + 11
       );
     }
   }
@@ -4606,16 +4770,16 @@ bool handleTouch(
 
     int row =
       (
-        touchY - 62
-      ) / 27;
+        touchY - 54
+      ) / 23;
 
     if (
       row >= 0 &&
       row < SETTING_COUNT &&
       touchY >=
-        62 + row * 27 &&
+        54 + row * 23 &&
       touchY <
-        86 + row * 27
+        74 + row * 23
     ) {
 
       settingSelIdx =
@@ -4697,6 +4861,18 @@ bool handleTouch(
           drawPageOrderEditor();
 
           return true;
+
+
+        case SETTING_FIRMWARE:
+
+          beep(
+            1200,
+            35
+          );
+
+          installFirmwareUpdate();
+
+          break;
       }
 
       drawSettingsPage();
@@ -5071,6 +5247,20 @@ void loop() {
             );
 
             drawPageOrderEditor();
+
+            break;
+
+
+          case SETTING_FIRMWARE:
+
+            beep(
+              1200,
+              35
+            );
+
+            installFirmwareUpdate();
+
+            drawSettingsPage();
 
             break;
         }
